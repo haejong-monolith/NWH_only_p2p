@@ -10,10 +10,15 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: e651dbb3fbac04af2b8f5abf007ddc23, type: 3}
-  m_Name: DefaultNetworkPrefabs
+  m_Name: BlindflyNetworkPrefabs
   m_EditorClassIdentifier: 
   IsDefault: 1
   List:
+  - Override: 0
+    Prefab: {fileID: 262146891463636522, guid: fea8b73daf895bc4a956fe2ae5f9d4c9, type: 3}
+    SourcePrefabToOverride: {fileID: 0}
+    SourceHashToOverride: 0
+    OverridingTargetPrefab: {fileID: 0}
   - Override: 0
     Prefab: {fileID: 6422779146464978875, guid: 62283b2db832ff74e8507e3127b590b6, type: 3}
     SourcePrefabToOverride: {fileID: 0}
