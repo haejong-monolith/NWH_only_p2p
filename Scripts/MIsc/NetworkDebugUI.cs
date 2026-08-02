@@ -1,6 +1,7 @@
 using Unity.Netcode;
 using Unity.Netcode.Transports.UTP;
 using UnityEngine;
+using Blindfly.Networking;
 
 public class NetworkDebugUI : MonoBehaviour
 {
@@ -11,7 +12,11 @@ public class NetworkDebugUI : MonoBehaviour
     private string portText = "7777";
     private string statusMessage = "Not started";
 
-    private Rect windowRect = new Rect(20f, 20f, 340f, 330f);
+    private Rect windowRect = new Rect(20f, 20f, 380f, 560f);
+    private Vector2 scrollPosition;
+    private VehicleSnapshotSynchronizer[] snapshotSynchronizers =
+        new VehicleSnapshotSynchronizer[0];
+    private float nextDiagnosticsRefreshTime;
 
     private void Awake()
     {
@@ -30,6 +35,7 @@ public class NetworkDebugUI : MonoBehaviour
 
     private void DrawWindow(int windowId)
     {
+        scrollPosition = GUILayout.BeginScrollView(scrollPosition);
         GUILayout.Space(5f);
 
         DrawCurrentStatus();
@@ -73,7 +79,97 @@ public class NetworkDebugUI : MonoBehaviour
         GUILayout.Space(10f);
         GUILayout.Label($"Status: {statusMessage}");
 
+        DrawNetworkDiagnostics();
+
+        GUILayout.EndScrollView();
+
         GUI.DragWindow();
+    }
+
+    private void DrawNetworkDiagnostics()
+    {
+        NetworkManager networkManager = NetworkManager.Singleton;
+
+        if (networkManager == null || !networkManager.IsListening)
+        {
+            return;
+        }
+
+        GUILayout.Space(12f);
+        GUILayout.Label("Diagnostics");
+        GUILayout.Label($"Tick Rate: {networkManager.NetworkConfig.TickRate} Hz");
+
+        UnityTransport transport =
+            networkManager.GetComponent<UnityTransport>();
+
+        if (transport != null && networkManager.IsClient)
+        {
+            ulong rtt = transport.GetCurrentRtt(
+                NetworkManager.ServerClientId);
+
+            GUILayout.Label($"RTT: {rtt} ms");
+        }
+
+        RefreshSnapshotSynchronizers();
+
+        int remoteVehicleCount = 0;
+
+        for (int i = 0; i < snapshotSynchronizers.Length; i++)
+        {
+            VehicleSnapshotSynchronizer synchronizer =
+                snapshotSynchronizers[i];
+
+            if (synchronizer == null ||
+                !synchronizer.IsInterpolatingRemoteClient)
+            {
+                continue;
+            }
+
+            remoteVehicleCount++;
+            GUILayout.Space(8f);
+            GUILayout.Label($"Remote Vehicle: {synchronizer.name}");
+            GUILayout.Label(
+                $"Buffer: {synchronizer.BufferedSnapshotCount} | " +
+                $"Delay: {synchronizer.InterpolationDelay * 1000f:F0} ms");
+
+            float sinceLast = synchronizer.TimeSinceLastSnapshot;
+            string sinceLastText = sinceLast < 0f
+                ? "waiting"
+                : $"{sinceLast * 1000f:F0} ms";
+
+            GUILayout.Label(
+                $"Receive Interval: " +
+                $"{synchronizer.SmoothedSnapshotInterval * 1000f:F1} ms | " +
+                $"Last: {sinceLastText}");
+
+            GUILayout.Label(
+                $"Snapshots: {synchronizer.AcceptedSnapshotCount}/" +
+                $"{synchronizer.ReceivedSnapshotCount} accepted | " +
+                $"Rejected: {synchronizer.RejectedSnapshotCount}");
+
+            GUILayout.Label(
+                $"Latest Tick: {synchronizer.LatestReceivedTick} | " +
+                $"Tick Gaps: {synchronizer.MissingTickCount}");
+        }
+
+        if (networkManager.IsClient && !networkManager.IsServer &&
+            remoteVehicleCount == 0)
+        {
+            GUILayout.Label("Remote Vehicle: waiting");
+        }
+    }
+
+    private void RefreshSnapshotSynchronizers()
+    {
+        if (Time.unscaledTime < nextDiagnosticsRefreshTime)
+        {
+            return;
+        }
+
+        snapshotSynchronizers =
+            FindObjectsOfType<VehicleSnapshotSynchronizer>();
+
+        nextDiagnosticsRefreshTime = Time.unscaledTime + 0.5f;
     }
 
     private void DrawCurrentStatus()

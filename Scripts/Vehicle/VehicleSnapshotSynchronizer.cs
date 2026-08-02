@@ -51,10 +51,41 @@ namespace Blindfly.Networking
         private double playbackStartServerTime;
         private double playbackStartRealtime;
 
+        private ulong receivedSnapshotCount;
+        private ulong acceptedSnapshotCount;
+        private ulong rejectedSnapshotCount;
+        private ulong missingTickCount;
+        private uint latestReceivedTick;
+        private bool hasReceivedTick;
+        private double lastSnapshotReceivedRealtime;
+        private float lastSnapshotInterval;
+        private float smoothedSnapshotInterval;
+
         public int BufferedSnapshotCount =>
             snapshotBuffer != null ? snapshotBuffer.Count : 0;
 
         public float InterpolationDelay => interpolationDelay;
+
+        public ulong ReceivedSnapshotCount => receivedSnapshotCount;
+
+        public ulong AcceptedSnapshotCount => acceptedSnapshotCount;
+
+        public ulong RejectedSnapshotCount => rejectedSnapshotCount;
+
+        public ulong MissingTickCount => missingTickCount;
+
+        public uint LatestReceivedTick => latestReceivedTick;
+
+        public float LastSnapshotInterval => lastSnapshotInterval;
+
+        public float SmoothedSnapshotInterval => smoothedSnapshotInterval;
+
+        public float TimeSinceLastSnapshot =>
+            receivedSnapshotCount == 0
+                ? -1f
+                : Mathf.Max(0f, (float)(
+                    Time.realtimeSinceStartupAsDouble -
+                    lastSnapshotReceivedRealtime));
 
         public bool IsInterpolatingRemoteClient =>
             IsSpawned && IsClient && !IsServer;
@@ -90,6 +121,7 @@ namespace Blindfly.Networking
             {
                 snapshotBuffer = new VehicleSnapshotBuffer(bufferCapacity);
                 ResetPlaybackClock();
+                ResetDiagnostics();
             }
 
             if (IsServer)
@@ -106,6 +138,7 @@ namespace Blindfly.Networking
             snapshotBuffer?.Clear();
             snapshotBuffer = null;
             ResetPlaybackClock();
+            ResetDiagnostics();
 
             base.OnNetworkDespawn();
         }
@@ -240,7 +273,56 @@ namespace Blindfly.Networking
                 return;
             }
 
+            double receivedRealtime = Time.realtimeSinceStartupAsDouble;
+            receivedSnapshotCount++;
+
+            if (receivedSnapshotCount > 1)
+            {
+                lastSnapshotInterval = Mathf.Max(
+                    0f,
+                    (float)(receivedRealtime -
+                            lastSnapshotReceivedRealtime));
+
+                smoothedSnapshotInterval = smoothedSnapshotInterval <= 0f
+                    ? lastSnapshotInterval
+                    : Mathf.Lerp(
+                        smoothedSnapshotInterval,
+                        lastSnapshotInterval,
+                        0.1f);
+            }
+
+            lastSnapshotReceivedRealtime = receivedRealtime;
+
+            if (hasReceivedTick)
+            {
+                uint tickDelta = unchecked(snapshot.Tick - latestReceivedTick);
+
+                if (tickDelta > 1 && tickDelta < 0x80000000u)
+                {
+                    missingTickCount += tickDelta - 1;
+                }
+
+                if (tickDelta > 0 && tickDelta < 0x80000000u)
+                {
+                    latestReceivedTick = snapshot.Tick;
+                }
+            }
+            else
+            {
+                latestReceivedTick = snapshot.Tick;
+                hasReceivedTick = true;
+            }
+
             bool added = snapshotBuffer.Add(snapshot);
+
+            if (added)
+            {
+                acceptedSnapshotCount++;
+            }
+            else
+            {
+                rejectedSnapshotCount++;
+            }
 
             if (added && !playbackClockInitialized)
             {
@@ -259,6 +341,19 @@ namespace Blindfly.Networking
             playbackClockInitialized = false;
             playbackStartServerTime = 0d;
             playbackStartRealtime = 0d;
+        }
+
+        private void ResetDiagnostics()
+        {
+            receivedSnapshotCount = 0;
+            acceptedSnapshotCount = 0;
+            rejectedSnapshotCount = 0;
+            missingTickCount = 0;
+            latestReceivedTick = 0;
+            hasReceivedTick = false;
+            lastSnapshotReceivedRealtime = 0d;
+            lastSnapshotInterval = 0f;
+            smoothedSnapshotInterval = 0f;
         }
 
         private void ApplySnapshot(VehicleSnapshot snapshot)
