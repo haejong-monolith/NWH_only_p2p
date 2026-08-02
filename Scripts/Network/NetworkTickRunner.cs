@@ -1,5 +1,4 @@
 using System;
-using System.Collections;
 using Unity.Netcode;
 using UnityEngine;
 
@@ -14,7 +13,6 @@ namespace Blindfly.Networking
         private NetworkManager networkManager;
         private NetworkTickSystem subscribedTickSystem;
 
-        private Coroutine subscribeCoroutine;
         private bool subscribed;
 
         private void Awake()
@@ -24,46 +22,63 @@ namespace Blindfly.Networking
 
         private void OnEnable()
         {
-            subscribeCoroutine = StartCoroutine(
-                SubscribeWhenNetworkStarted());
+            RefreshSubscription();
+        }
+
+        private void Update()
+        {
+            RefreshSubscription();
         }
 
         private void OnDisable()
         {
-            StopSubscribeCoroutine();
             Unsubscribe();
         }
 
         private void OnDestroy()
         {
-            StopSubscribeCoroutine();
             Unsubscribe();
         }
 
-        private IEnumerator SubscribeWhenNetworkStarted()
+        private void RefreshSubscription()
         {
-            while (networkManager != null &&
-                   !networkManager.IsListening)
-            {
-                yield return null;
-            }
-
             if (networkManager == null)
             {
-                yield break;
+                networkManager = GetComponent<NetworkManager>();
             }
 
-            subscribedTickSystem =
+            if (networkManager == null ||
+                !networkManager.IsListening)
+            {
+                Unsubscribe();
+                return;
+            }
+
+            NetworkTickSystem currentTickSystem =
                 networkManager.NetworkTickSystem;
 
-            if (subscribedTickSystem == null)
+            if (currentTickSystem == null)
             {
-                yield break;
+                Unsubscribe();
+                return;
             }
 
+            if (subscribed &&
+                ReferenceEquals(
+                    subscribedTickSystem,
+                    currentTickSystem))
+            {
+                return;
+            }
+
+            // Shutdown 후 같은 NetworkManager로 재접속하면 TickSystem의
+            // 수명 주기가 새로 시작된다. 기존 구독을 제거하고 현재
+            // TickSystem에 다시 연결해야 로컬 입력 전송이 재개된다.
+            Unsubscribe();
+
+            subscribedTickSystem = currentTickSystem;
             subscribedTickSystem.Tick += OnNetworkTick;
             subscribed = true;
-            subscribeCoroutine = null;
 
             Debug.Log(
                 $"[NetworkTickRunner] Tick 구독 완료 | " +
@@ -85,17 +100,6 @@ namespace Blindfly.Networking
 
             subscribedTickSystem = null;
             subscribed = false;
-        }
-
-        private void StopSubscribeCoroutine()
-        {
-            if (subscribeCoroutine == null)
-            {
-                return;
-            }
-
-            StopCoroutine(subscribeCoroutine);
-            subscribeCoroutine = null;
         }
 
         private static void OnNetworkTick()
