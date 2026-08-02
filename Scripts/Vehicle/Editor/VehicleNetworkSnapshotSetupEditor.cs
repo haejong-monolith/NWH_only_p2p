@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using NWH.VehiclePhysics2.Modules.Rigging;
 using Unity.Netcode;
 using UnityEditor;
 using UnityEditor.SceneManagement;
@@ -182,6 +183,13 @@ namespace Blindfly.Networking.Editor
             SetObjectArray(
                 serialized.FindProperty("simulationVisualParts"),
                 wheelRotatingTransforms
+                    .Cast<UnityEngine.Object>()
+                    .ToArray());
+
+            SetObjectArray(
+                serialized.FindProperty("simulationRiggingModules"),
+                vehicleRoot
+                    .GetComponentsInChildren<RiggingModuleWrapper>(true)
                     .Cast<UnityEngine.Object>()
                     .ToArray());
 

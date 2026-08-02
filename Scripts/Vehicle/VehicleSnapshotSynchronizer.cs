@@ -1,3 +1,4 @@
+using NWH.VehiclePhysics2.Modules.Rigging;
 using Unity.Netcode;
 using UnityEngine;
 
@@ -27,6 +28,10 @@ namespace Blindfly.Networking
         [Tooltip("NWH가 갱신하는 바퀴 등 꼭 필요한 Transform만 순서대로 지정합니다.")]
         [SerializeField]
         private Transform[] simulationVisualParts;
+
+        [Tooltip("동기화된 바퀴 위치를 따라 Client에서 다시 계산할 NWH 서스펜션 리깅 모듈")]
+        [SerializeField]
+        private RiggingModuleWrapper[] simulationRiggingModules;
 
         [Header("Remote Client Interpolation")]
 
@@ -60,6 +65,7 @@ namespace Blindfly.Networking
         private double lastSnapshotReceivedRealtime;
         private float lastSnapshotInterval;
         private float smoothedSnapshotInterval;
+        private bool clientRiggingInitialized;
 
         public int BufferedSnapshotCount =>
             snapshotBuffer != null ? snapshotBuffer.Count : 0;
@@ -102,6 +108,13 @@ namespace Blindfly.Networking
                 simulationRigidbody =
                     simulationRoot.GetComponent<Rigidbody>();
             }
+
+            if (simulationRiggingModules == null ||
+                simulationRiggingModules.Length == 0)
+            {
+                simulationRiggingModules =
+                    GetComponentsInChildren<RiggingModuleWrapper>(true);
+            }
         }
 
         public override void OnNetworkSpawn()
@@ -122,6 +135,7 @@ namespace Blindfly.Networking
                 snapshotBuffer = new VehicleSnapshotBuffer(bufferCapacity);
                 ResetPlaybackClock();
                 ResetDiagnostics();
+                InitializeClientRigging();
             }
 
             if (IsServer)
@@ -139,6 +153,7 @@ namespace Blindfly.Networking
             snapshotBuffer = null;
             ResetPlaybackClock();
             ResetDiagnostics();
+            clientRiggingInitialized = false;
 
             base.OnNetworkDespawn();
         }
@@ -374,6 +389,79 @@ namespace Blindfly.Networking
 
                 target.localPosition = part.LocalPosition;
                 target.localRotation = part.LocalRotation;
+            }
+
+            UpdateClientRigging();
+        }
+
+        private void InitializeClientRigging()
+        {
+            clientRiggingInitialized = false;
+
+            if (simulationRiggingModules == null)
+            {
+                return;
+            }
+
+            for (int i = 0; i < simulationRiggingModules.Length; i++)
+            {
+                RiggingModuleWrapper wrapper =
+                    simulationRiggingModules[i];
+
+                if (wrapper == null ||
+                    wrapper.module == null ||
+                    wrapper.module.bones == null)
+                {
+                    continue;
+                }
+
+                for (int j = 0; j < wrapper.module.bones.Count; j++)
+                {
+                    Bone bone = wrapper.module.bones[j];
+
+                    if (bone != null)
+                    {
+                        bone.Initialize();
+                    }
+                }
+            }
+
+            clientRiggingInitialized = true;
+        }
+
+        private void UpdateClientRigging()
+        {
+            if (!clientRiggingInitialized ||
+                simulationRiggingModules == null ||
+                simulationRoot == null)
+            {
+                return;
+            }
+
+            Vector3 forward = simulationRoot.forward;
+            Vector3 up = simulationRoot.up;
+
+            for (int i = 0; i < simulationRiggingModules.Length; i++)
+            {
+                RiggingModuleWrapper wrapper =
+                    simulationRiggingModules[i];
+
+                if (wrapper == null ||
+                    wrapper.module == null ||
+                    wrapper.module.bones == null)
+                {
+                    continue;
+                }
+
+                for (int j = 0; j < wrapper.module.bones.Count; j++)
+                {
+                    Bone bone = wrapper.module.bones[j];
+
+                    if (bone != null)
+                    {
+                        bone.Update(forward, up);
+                    }
+                }
             }
         }
 
