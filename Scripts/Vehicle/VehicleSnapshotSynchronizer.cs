@@ -43,6 +43,11 @@ namespace Blindfly.Networking
         [SerializeField]
         private int bufferCapacity = 32;
 
+        [Tooltip("재생 시각과 최신 Snapshot 기준 시각의 차이가 이 값을 넘으면 자동으로 재동기화합니다.")]
+        [Min(0.05f)]
+        [SerializeField]
+        private float playbackResyncThreshold = 0.25f;
+
         private VehicleSnapshotBuffer snapshotBuffer;
         private bool tickSubscribed;
         private bool configurationValid;
@@ -50,8 +55,9 @@ namespace Blindfly.Networking
 
         // Snapshot의 ServerTime에는 Network Tick 시각이 아니라
         // Pose가 실제로 생성된 서버 물리 시각이 들어간다.
-        // 첫 Snapshot의 물리 시각에 로컬 단조 시계를 한 번 고정한 뒤,
-        // 화면 재생 시각은 절대로 뒤로 가지 않도록 별도로 진행한다.
+        // 첫 Snapshot의 물리 시각에 로컬 단조 시계를 고정하고,
+        // 정상 상태에서는 그 기준을 유지한다. 큰 시간 오차가 감지된
+        // 경우에만 최신 Snapshot 기준으로 다시 고정한다.
         private bool playbackClockInitialized;
         private double playbackStartServerTime;
         private double playbackStartRealtime;
@@ -65,10 +71,27 @@ namespace Blindfly.Networking
         private double lastSnapshotReceivedRealtime;
         private float lastSnapshotInterval;
         private float smoothedSnapshotInterval;
+        private ulong bufferUnderrunCount;
+        private ulong bufferOverrunCount;
+        private ulong playbackResyncCount;
+        private ulong acceptedSnapshotCountAtLastResync;
+        private float playbackTimeError;
+        private bool bufferUnderrunActive;
+        private bool bufferOverrunActive;
         private bool clientRiggingInitialized;
 
         public int BufferedSnapshotCount =>
             snapshotBuffer != null ? snapshotBuffer.Count : 0;
+
+        public int SnapshotBufferCapacity =>
+            snapshotBuffer != null
+                ? snapshotBuffer.Capacity
+                : bufferCapacity;
+
+        public float BufferedSnapshotTimeSpan =>
+            snapshotBuffer != null
+                ? Mathf.Max(0f, (float)snapshotBuffer.BufferedTimeSpan)
+                : 0f;
 
         public float InterpolationDelay => interpolationDelay;
 
@@ -79,6 +102,18 @@ namespace Blindfly.Networking
         public ulong RejectedSnapshotCount => rejectedSnapshotCount;
 
         public ulong MissingTickCount => missingTickCount;
+
+        public ulong BufferUnderrunCount => bufferUnderrunCount;
+
+        public ulong BufferOverrunCount => bufferOverrunCount;
+
+        public ulong PlaybackResyncCount => playbackResyncCount;
+
+        public float PlaybackTimeError => playbackTimeError;
+
+        public bool IsBufferUnderrun => bufferUnderrunActive;
+
+        public bool IsBufferOverrun => bufferOverrunActive;
 
         public uint LatestReceivedTick => latestReceivedTick;
 
@@ -179,7 +214,7 @@ namespace Blindfly.Networking
 
             // NGO ServerTime을 프레임마다 다시 읽지 않는다.
             // realtimeSinceStartup은 Client의 시간 동기화 보정과 무관하게
-            // 단조롭게 증가하므로 Snapshot 재생이 뒤로 튀지 않는다.
+            // 단조롭게 증가하므로 정상 재생 중 시각이 뒤로 튀지 않는다.
             double elapsed =
                 Time.realtimeSinceStartupAsDouble -
                 playbackStartRealtime;
@@ -190,6 +225,18 @@ namespace Blindfly.Networking
             }
 
             double renderTime = playbackStartServerTime + elapsed;
+
+            if (!snapshotBuffer.TryGetTimeRange(
+                    out double oldestServerTime,
+                    out double newestServerTime))
+            {
+                return;
+            }
+
+            EvaluatePlaybackHealth(
+                ref renderTime,
+                oldestServerTime,
+                newestServerTime);
 
             if (!snapshotBuffer.TrySample(
                     renderTime,
@@ -348,7 +395,91 @@ namespace Blindfly.Networking
                     Time.realtimeSinceStartupAsDouble;
 
                 playbackClockInitialized = true;
+                acceptedSnapshotCountAtLastResync =
+                    acceptedSnapshotCount;
             }
+        }
+
+        private void EvaluatePlaybackHealth(
+            ref double renderTime,
+            double oldestServerTime,
+            double newestServerTime)
+        {
+            double desiredRenderTime =
+                newestServerTime - interpolationDelay;
+
+            if (desiredRenderTime < oldestServerTime)
+            {
+                desiredRenderTime = oldestServerTime;
+            }
+
+            double error = desiredRenderTime - renderTime;
+            playbackTimeError = (float)error;
+
+            bool overrun = error > playbackResyncThreshold;
+            bool underrun = renderTime > newestServerTime;
+
+            if (overrun)
+            {
+                if (!bufferOverrunActive)
+                {
+                    bufferOverrunCount++;
+                }
+
+                bufferOverrunActive = true;
+                bufferUnderrunActive = false;
+
+                TryResynchronizePlayback(
+                    ref renderTime,
+                    desiredRenderTime);
+
+                return;
+            }
+
+            if (underrun)
+            {
+                if (!bufferUnderrunActive)
+                {
+                    bufferUnderrunCount++;
+                }
+
+                bufferUnderrunActive = true;
+                bufferOverrunActive = false;
+
+                if (renderTime - newestServerTime >
+                    playbackResyncThreshold)
+                {
+                    TryResynchronizePlayback(
+                        ref renderTime,
+                        desiredRenderTime);
+                }
+
+                return;
+            }
+
+            bufferUnderrunActive = false;
+            bufferOverrunActive = false;
+        }
+
+        private void TryResynchronizePlayback(
+            ref double renderTime,
+            double desiredRenderTime)
+        {
+            // 송신이 멈춘 동안에는 마지막 Pose를 유지한다. 새 Snapshot이
+            // 들어오지 않았는데 매 임계 시간마다 재동기화 횟수만 늘어나는
+            // 것을 막고, 수신이 재개된 첫 시점에 한 번만 복구한다.
+            if (acceptedSnapshotCount ==
+                acceptedSnapshotCountAtLastResync)
+            {
+                return;
+            }
+
+            playbackStartServerTime = desiredRenderTime;
+            playbackStartRealtime = Time.realtimeSinceStartupAsDouble;
+            acceptedSnapshotCountAtLastResync = acceptedSnapshotCount;
+            playbackResyncCount++;
+            playbackTimeError = 0f;
+            renderTime = desiredRenderTime;
         }
 
         private void ResetPlaybackClock()
@@ -369,6 +500,13 @@ namespace Blindfly.Networking
             lastSnapshotReceivedRealtime = 0d;
             lastSnapshotInterval = 0f;
             smoothedSnapshotInterval = 0f;
+            bufferUnderrunCount = 0;
+            bufferOverrunCount = 0;
+            playbackResyncCount = 0;
+            acceptedSnapshotCountAtLastResync = 0;
+            playbackTimeError = 0f;
+            bufferUnderrunActive = false;
+            bufferOverrunActive = false;
         }
 
         private void ApplySnapshot(VehicleSnapshot snapshot)

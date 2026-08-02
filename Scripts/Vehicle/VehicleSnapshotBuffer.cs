@@ -13,6 +13,13 @@ namespace Blindfly.Networking
 
         public int Count => snapshots.Count;
 
+        public int Capacity => capacity;
+
+        public double BufferedTimeSpan => snapshots.Count < 2
+            ? 0d
+            : snapshots[snapshots.Count - 1].ServerTime -
+              snapshots[0].ServerTime;
+
         public VehicleSnapshotBuffer(int capacity)
         {
             this.capacity = capacity < 2 ? 2 : capacity;
@@ -22,6 +29,22 @@ namespace Blindfly.Networking
         public void Clear()
         {
             snapshots.Clear();
+        }
+
+        public bool TryGetTimeRange(
+            out double oldestServerTime,
+            out double newestServerTime)
+        {
+            if (snapshots.Count == 0)
+            {
+                oldestServerTime = 0d;
+                newestServerTime = 0d;
+                return false;
+            }
+
+            oldestServerTime = snapshots[0].ServerTime;
+            newestServerTime = snapshots[snapshots.Count - 1].ServerTime;
+            return true;
         }
 
         public bool Add(VehicleSnapshot snapshot)

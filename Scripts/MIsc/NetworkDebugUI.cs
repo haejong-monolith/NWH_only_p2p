@@ -129,8 +129,21 @@ public class NetworkDebugUI : MonoBehaviour
             GUILayout.Space(8f);
             GUILayout.Label($"Remote Vehicle: {synchronizer.name}");
             GUILayout.Label(
-                $"Buffer: {synchronizer.BufferedSnapshotCount} | " +
-                $"Delay: {synchronizer.InterpolationDelay * 1000f:F0} ms");
+                $"Buffer: {synchronizer.BufferedSnapshotCount}/" +
+                $"{synchronizer.SnapshotBufferCapacity} | " +
+                $"Span: " +
+                $"{synchronizer.BufferedSnapshotTimeSpan * 1000f:F0} ms");
+
+            string playbackState = synchronizer.IsBufferOverrun
+                ? "Overrun"
+                : synchronizer.IsBufferUnderrun
+                    ? "Underrun"
+                    : "Normal";
+
+            GUILayout.Label(
+                $"Playback: {playbackState} | " +
+                $"Delay: {synchronizer.InterpolationDelay * 1000f:F0} ms | " +
+                $"Error: {synchronizer.PlaybackTimeError * 1000f:+0;-0;0} ms");
 
             float sinceLast = synchronizer.TimeSinceLastSnapshot;
             string sinceLastText = sinceLast < 0f
@@ -150,6 +163,11 @@ public class NetworkDebugUI : MonoBehaviour
             GUILayout.Label(
                 $"Latest Tick: {synchronizer.LatestReceivedTick} | " +
                 $"Tick Gaps: {synchronizer.MissingTickCount}");
+
+            GUILayout.Label(
+                $"Buffer Events: U {synchronizer.BufferUnderrunCount} | " +
+                $"O {synchronizer.BufferOverrunCount} | " +
+                $"Resync {synchronizer.PlaybackResyncCount}");
         }
 
         if (networkManager.IsClient && !networkManager.IsServer &&
