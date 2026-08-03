@@ -57,6 +57,11 @@ namespace Blindfly.Networking
         public Vector3 Velocity;
         public Vector3 AngularVelocity;
 
+        // NWH LightsManager.GetIntState()의 결과.
+        // bit 0~7에 브레이크등, 미등, 후진등, 하향등, 상향등,
+        // 좌/우 방향지시등, 추가 조명의 실제 출력 상태가 들어간다.
+        public int LightState;
+
         public FixedList512Bytes<VehicleVisualPartSnapshot> VisualParts;
 
         public void NetworkSerialize<T>(BufferSerializer<T> serializer)
@@ -70,6 +75,7 @@ namespace Blindfly.Networking
 
             serializer.SerializeValue(ref Velocity);
             serializer.SerializeValue(ref AngularVelocity);
+            serializer.SerializeValue(ref LightState);
 
             int partCount = VisualParts.Length;
             serializer.SerializeValue(ref partCount);
@@ -138,7 +144,13 @@ namespace Blindfly.Networking
                 AngularVelocity = Vector3.LerpUnclamped(
                     from.AngularVelocity,
                     to.AngularVelocity,
-                    t)
+                    t),
+
+                // 조명은 연속값이 아니므로 다음 Snapshot 시각에 도달할
+                // 때까지 현재 확정 상태를 유지한다.
+                LightState = t < 1f
+                    ? from.LightState
+                    : to.LightState
             };
 
             int partCount = Mathf.Min(

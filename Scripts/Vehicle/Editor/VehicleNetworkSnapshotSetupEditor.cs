@@ -180,6 +180,10 @@ namespace Blindfly.Networking.Editor
             serialized.FindProperty("simulationRigidbody").objectReferenceValue =
                 vehicleRoot.GetComponent<Rigidbody>();
 
+            serialized.FindProperty("simulationVehicleController")
+                .objectReferenceValue =
+                    vehicleRoot.GetComponent<NWH.VehiclePhysics2.VehicleController>();
+
             SetObjectArray(
                 serialized.FindProperty("simulationVisualParts"),
                 wheelRotatingTransforms

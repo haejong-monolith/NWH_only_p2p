@@ -1,4 +1,5 @@
 using NWH.VehiclePhysics2.Modules.Rigging;
+using NWH.VehiclePhysics2;
 using Unity.Netcode;
 using UnityEngine;
 
@@ -24,6 +25,10 @@ namespace Blindfly.Networking
 
         [SerializeField]
         private Rigidbody simulationRigidbody;
+
+        [Tooltip("서버에서 실제 조명 상태를 읽고 Client에 적용할 NWH VehicleController")]
+        [SerializeField]
+        private VehicleController simulationVehicleController;
 
         [Tooltip("NWH가 갱신하는 바퀴 등 꼭 필요한 Transform만 순서대로 지정합니다.")]
         [SerializeField]
@@ -79,6 +84,8 @@ namespace Blindfly.Networking
         private bool bufferUnderrunActive;
         private bool bufferOverrunActive;
         private bool clientRiggingInitialized;
+        private bool hasAppliedLightState;
+        private int lastAppliedLightState;
 
         public int BufferedSnapshotCount =>
             snapshotBuffer != null ? snapshotBuffer.Count : 0;
@@ -144,6 +151,13 @@ namespace Blindfly.Networking
                     simulationRoot.GetComponent<Rigidbody>();
             }
 
+            if (simulationVehicleController == null &&
+                simulationRoot != null)
+            {
+                simulationVehicleController =
+                    simulationRoot.GetComponent<VehicleController>();
+            }
+
             if (simulationRiggingModules == null ||
                 simulationRiggingModules.Length == 0)
             {
@@ -170,6 +184,7 @@ namespace Blindfly.Networking
                 snapshotBuffer = new VehicleSnapshotBuffer(bufferCapacity);
                 ResetPlaybackClock();
                 ResetDiagnostics();
+                ResetLightState();
                 InitializeClientRigging();
             }
 
@@ -188,6 +203,7 @@ namespace Blindfly.Networking
             snapshotBuffer = null;
             ResetPlaybackClock();
             ResetDiagnostics();
+            ResetLightState();
             clientRiggingInitialized = false;
 
             base.OnNetworkDespawn();
@@ -303,7 +319,9 @@ namespace Blindfly.Networking
 
                 AngularVelocity = simulationRigidbody != null
                     ? simulationRigidbody.angularVelocity
-                    : Vector3.zero
+                    : Vector3.zero,
+
+                LightState = CaptureLightState()
             };
 
             int partCount = Mathf.Min(
@@ -530,6 +548,47 @@ namespace Blindfly.Networking
             }
 
             UpdateClientRigging();
+            ApplyLightState(snapshot.LightState);
+        }
+
+        private int CaptureLightState()
+        {
+            if (simulationVehicleController == null ||
+                simulationVehicleController.effectsManager == null ||
+                simulationVehicleController.effectsManager.lightsManager == null)
+            {
+                return 0;
+            }
+
+            return simulationVehicleController
+                .effectsManager
+                .lightsManager
+                .GetIntState();
+        }
+
+        private void ApplyLightState(int lightState)
+        {
+            if (simulationVehicleController == null ||
+                simulationVehicleController.effectsManager == null ||
+                simulationVehicleController.effectsManager.lightsManager == null ||
+                hasAppliedLightState && lastAppliedLightState == lightState)
+            {
+                return;
+            }
+
+            simulationVehicleController
+                .effectsManager
+                .lightsManager
+                .SetStateFromInt(lightState);
+
+            lastAppliedLightState = lightState;
+            hasAppliedLightState = true;
+        }
+
+        private void ResetLightState()
+        {
+            hasAppliedLightState = false;
+            lastAppliedLightState = 0;
         }
 
         private void InitializeClientRigging()
@@ -617,6 +676,15 @@ namespace Blindfly.Networking
             if (simulationVisualParts == null)
             {
                 simulationVisualParts = new Transform[0];
+            }
+
+            if (simulationVehicleController == null)
+            {
+                Debug.LogError(
+                    "[VehicleSnapshot] NWH VehicleController가 필요합니다.",
+                    this);
+
+                return false;
             }
 
             if (simulationVisualParts.Length >
