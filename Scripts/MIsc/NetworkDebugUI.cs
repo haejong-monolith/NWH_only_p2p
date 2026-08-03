@@ -77,7 +77,7 @@ public class NetworkDebugUI : MonoBehaviour
         GUI.enabled = true;
 
         GUILayout.Space(10f);
-        GUILayout.Label($"Status: {statusMessage}");
+        GUILayout.Label($"Status: {GetCurrentStatusMessage()}");
 
         DrawNetworkDiagnostics();
 
@@ -229,6 +229,38 @@ public class NetworkDebugUI : MonoBehaviour
                 $"Connected Clients: {networkManager.ConnectedClientsIds.Count}"
             );
         }
+    }
+
+    private string GetCurrentStatusMessage()
+    {
+        NetworkManager networkManager = NetworkManager.Singleton;
+
+        if (networkManager == null)
+        {
+            return "NetworkManager not found";
+        }
+
+        if (networkManager.IsHost && networkManager.IsListening)
+        {
+            return $"Host started on port {serverPort}";
+        }
+
+        if (networkManager.IsServer && networkManager.IsListening)
+        {
+            return $"Server started on port {serverPort}";
+        }
+
+        if (networkManager.IsConnectedClient)
+        {
+            return $"Connected to {serverAddress.Trim()}:{serverPort}";
+        }
+
+        if (networkManager.IsClient && networkManager.IsListening)
+        {
+            return $"Connecting to {serverAddress.Trim()}:{serverPort}";
+        }
+
+        return statusMessage;
     }
 
     private bool CanStartNetwork()
