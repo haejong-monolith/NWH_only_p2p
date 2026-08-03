@@ -4,6 +4,73 @@ using UnityEngine;
 
 namespace Blindfly.Networking
 {
+    [System.Flags]
+    public enum VehicleSoundFlags : byte
+    {
+        None = 0,
+        EngineRunning = 1 << 0,
+        StarterActive = 1 << 1,
+        IgnitionOn = 1 << 2,
+        HornOn = 1 << 3
+    }
+
+    /// <summary>
+    /// 원격 Client가 NWH 물리를 실행하지 않고 핵심 차량 사운드를
+    /// 재생하기 위해 필요한 최소 상태.
+    /// </summary>
+    public struct VehicleSoundSnapshot : INetworkSerializable
+    {
+        public float EngineRpmPercent;
+        public float EngineLoad;
+        public int Gear;
+        public VehicleSoundFlags Flags;
+
+        public bool HasFlag(VehicleSoundFlags flag)
+        {
+            return (Flags & flag) != 0;
+        }
+
+        public void NetworkSerialize<T>(BufferSerializer<T> serializer)
+            where T : IReaderWriter
+        {
+            serializer.SerializeValue(ref EngineRpmPercent);
+            serializer.SerializeValue(ref EngineLoad);
+            serializer.SerializeValue(ref Gear);
+
+            byte flags = (byte)Flags;
+            serializer.SerializeValue(ref flags);
+
+            if (serializer.IsReader)
+            {
+                Flags = (VehicleSoundFlags)flags;
+            }
+        }
+
+        public static VehicleSoundSnapshot Interpolate(
+            VehicleSoundSnapshot from,
+            VehicleSoundSnapshot to,
+            float t)
+        {
+            return new VehicleSoundSnapshot
+            {
+                EngineRpmPercent = Mathf.LerpUnclamped(
+                    from.EngineRpmPercent,
+                    to.EngineRpmPercent,
+                    t),
+
+                EngineLoad = Mathf.LerpUnclamped(
+                    from.EngineLoad,
+                    to.EngineLoad,
+                    t),
+
+                // 기어와 이벤트 플래그는 다음 Snapshot 시각에 도달할
+                // 때까지 현재 확정 상태를 유지한다.
+                Gear = t < 1f ? from.Gear : to.Gear,
+                Flags = t < 1f ? from.Flags : to.Flags
+            };
+        }
+    }
+
     /// <summary>
     /// 서버의 시뮬레이션 파트 하나를 Presentation 파트로 복제하기 위한 로컬 Pose.
     /// 모든 Transform을 보내지 않고 Inspector에서 선택한 파트만 담는다.
@@ -62,6 +129,8 @@ namespace Blindfly.Networking
         // 좌/우 방향지시등, 추가 조명의 실제 출력 상태가 들어간다.
         public int LightState;
 
+        public VehicleSoundSnapshot SoundState;
+
         public FixedList512Bytes<VehicleVisualPartSnapshot> VisualParts;
 
         public void NetworkSerialize<T>(BufferSerializer<T> serializer)
@@ -76,6 +145,7 @@ namespace Blindfly.Networking
             serializer.SerializeValue(ref Velocity);
             serializer.SerializeValue(ref AngularVelocity);
             serializer.SerializeValue(ref LightState);
+            SoundState.NetworkSerialize(serializer);
 
             int partCount = VisualParts.Length;
             serializer.SerializeValue(ref partCount);
@@ -150,7 +220,12 @@ namespace Blindfly.Networking
                 // 때까지 현재 확정 상태를 유지한다.
                 LightState = t < 1f
                     ? from.LightState
-                    : to.LightState
+                    : to.LightState,
+
+                SoundState = VehicleSoundSnapshot.Interpolate(
+                    from.SoundState,
+                    to.SoundState,
+                    t)
             };
 
             int partCount = Mathf.Min(

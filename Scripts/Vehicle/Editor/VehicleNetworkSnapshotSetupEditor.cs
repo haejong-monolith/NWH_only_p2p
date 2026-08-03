@@ -130,10 +130,25 @@ namespace Blindfly.Networking.Editor
                         vehicleRoot.gameObject);
             }
 
+            RemoteVehicleSoundPlayback remoteSoundPlayback =
+                vehicleRoot.GetComponent<RemoteVehicleSoundPlayback>();
+
+            if (remoteSoundPlayback == null)
+            {
+                remoteSoundPlayback =
+                    Undo.AddComponent<RemoteVehicleSoundPlayback>(
+                        vehicleRoot.gameObject);
+            }
+
             ConfigureSynchronizer(
                 vehicleRoot,
                 validation.WheelRotatingTransforms,
+                remoteSoundPlayback,
                 synchronizer);
+
+            ConfigureRemoteSoundPlayback(
+                vehicleRoot,
+                remoteSoundPlayback);
 
             ConfigureGate(vehicleRoot, synchronizer, gate);
             ConfigureOwnerPresentationGate(
@@ -143,6 +158,7 @@ namespace Blindfly.Networking.Editor
             EditorUtility.SetDirty(synchronizer);
             EditorUtility.SetDirty(gate);
             EditorUtility.SetDirty(ownerPresentationGate);
+            EditorUtility.SetDirty(remoteSoundPlayback);
 
             PrefabStage stage = PrefabStageUtility.GetCurrentPrefabStage();
 
@@ -166,6 +182,7 @@ namespace Blindfly.Networking.Editor
         private static void ConfigureSynchronizer(
             Transform vehicleRoot,
             IList<Transform> wheelRotatingTransforms,
+            RemoteVehicleSoundPlayback remoteSoundPlayback,
             VehicleSnapshotSynchronizer synchronizer)
         {
             Undo.RecordObject(
@@ -184,6 +201,9 @@ namespace Blindfly.Networking.Editor
                 .objectReferenceValue =
                     vehicleRoot.GetComponent<NWH.VehiclePhysics2.VehicleController>();
 
+            serialized.FindProperty("remoteSoundPlayback")
+                .objectReferenceValue = remoteSoundPlayback;
+
             SetObjectArray(
                 serialized.FindProperty("simulationVisualParts"),
                 wheelRotatingTransforms
@@ -196,6 +216,24 @@ namespace Blindfly.Networking.Editor
                     .GetComponentsInChildren<RiggingModuleWrapper>(true)
                     .Cast<UnityEngine.Object>()
                     .ToArray());
+
+            serialized.ApplyModifiedProperties();
+        }
+
+        private static void ConfigureRemoteSoundPlayback(
+            Transform vehicleRoot,
+            RemoteVehicleSoundPlayback remoteSoundPlayback)
+        {
+            Undo.RecordObject(
+                remoteSoundPlayback,
+                "Configure Remote Vehicle Sound Playback");
+
+            SerializedObject serialized =
+                new SerializedObject(remoteSoundPlayback);
+
+            serialized.FindProperty("vehicleController")
+                .objectReferenceValue =
+                    vehicleRoot.GetComponent<NWH.VehiclePhysics2.VehicleController>();
 
             serialized.ApplyModifiedProperties();
         }

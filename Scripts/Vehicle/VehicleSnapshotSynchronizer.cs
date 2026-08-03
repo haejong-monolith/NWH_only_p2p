@@ -30,6 +30,10 @@ namespace Blindfly.Networking
         [SerializeField]
         private VehicleController simulationVehicleController;
 
+        [Tooltip("순수 Client에서 동기화된 상태로 NWH 차량 사운드를 재생할 컴포넌트")]
+        [SerializeField]
+        private RemoteVehicleSoundPlayback remoteSoundPlayback;
+
         [Tooltip("NWH가 갱신하는 바퀴 등 꼭 필요한 Transform만 순서대로 지정합니다.")]
         [SerializeField]
         private Transform[] simulationVisualParts;
@@ -155,7 +159,7 @@ namespace Blindfly.Networking
                 simulationRoot != null)
             {
                 simulationVehicleController =
-                    simulationRoot.GetComponent<VehicleController>();
+                    simulationRoot.GetComponentInChildren<VehicleController>(true);
             }
 
             if (simulationRiggingModules == null ||
@@ -164,6 +168,23 @@ namespace Blindfly.Networking
                 simulationRiggingModules =
                     GetComponentsInChildren<RiggingModuleWrapper>(true);
             }
+
+            if (remoteSoundPlayback == null)
+            {
+                remoteSoundPlayback =
+                    GetComponent<RemoteVehicleSoundPlayback>();
+
+                // 기존 v3.1 Prefab에도 Scripts 덮어쓰기만으로 테스트할 수
+                // 있도록 누락된 비네트워크 재생 컴포넌트는 런타임에 보완한다.
+                if (remoteSoundPlayback == null)
+                {
+                    remoteSoundPlayback =
+                        gameObject.AddComponent<RemoteVehicleSoundPlayback>();
+                }
+            }
+
+            remoteSoundPlayback.SetVehicleController(
+                simulationVehicleController);
         }
 
         public override void OnNetworkSpawn()
@@ -204,6 +225,7 @@ namespace Blindfly.Networking
             ResetPlaybackClock();
             ResetDiagnostics();
             ResetLightState();
+            remoteSoundPlayback?.StopAndReset();
             clientRiggingInitialized = false;
 
             base.OnNetworkDespawn();
@@ -321,7 +343,8 @@ namespace Blindfly.Networking
                     ? simulationRigidbody.angularVelocity
                     : Vector3.zero,
 
-                LightState = CaptureLightState()
+                LightState = CaptureLightState(),
+                SoundState = CaptureSoundState()
             };
 
             int partCount = Mathf.Min(
@@ -549,6 +572,59 @@ namespace Blindfly.Networking
 
             UpdateClientRigging();
             ApplyLightState(snapshot.LightState);
+
+            if (remoteSoundPlayback != null)
+            {
+                remoteSoundPlayback.Apply(
+                    snapshot.SoundState,
+                    snapshot.Velocity);
+            }
+        }
+
+        private VehicleSoundSnapshot CaptureSoundState()
+        {
+            VehicleSoundSnapshot state = default;
+
+            if (simulationVehicleController == null ||
+                simulationVehicleController.powertrain == null ||
+                simulationVehicleController.powertrain.engine == null ||
+                simulationVehicleController.powertrain.transmission == null)
+            {
+                return state;
+            }
+
+            var engine =
+                simulationVehicleController.powertrain.engine;
+
+            state.EngineRpmPercent = Mathf.Clamp01(engine.RPMPercent);
+            state.EngineLoad = Mathf.Clamp01(engine.Load);
+            state.Gear = simulationVehicleController
+                .powertrain
+                .transmission
+                .Gear;
+
+            if (engine.IsRunning)
+            {
+                state.Flags |= VehicleSoundFlags.EngineRunning;
+            }
+
+            if (engine.starterActive)
+            {
+                state.Flags |= VehicleSoundFlags.StarterActive;
+            }
+
+            if (engine.ignition)
+            {
+                state.Flags |= VehicleSoundFlags.IgnitionOn;
+            }
+
+            if (simulationVehicleController.input != null &&
+                simulationVehicleController.input.Horn)
+            {
+                state.Flags |= VehicleSoundFlags.HornOn;
+            }
+
+            return state;
         }
 
         private int CaptureLightState()
@@ -682,6 +758,15 @@ namespace Blindfly.Networking
             {
                 Debug.LogError(
                     "[VehicleSnapshot] NWH VehicleController가 필요합니다.",
+                    this);
+
+                return false;
+            }
+
+            if (remoteSoundPlayback == null)
+            {
+                Debug.LogError(
+                    "[VehicleSnapshot] RemoteVehicleSoundPlayback이 필요합니다.",
                     this);
 
                 return false;
